@@ -130,3 +130,10 @@ dmypy.json
 
 .idea/
 save_models/
+
+# Test Images
+*.png
+
+# Models
+InterDataset_shot10
+IntraDataset_shot10
