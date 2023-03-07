@@ -96,7 +96,7 @@ with torch.no_grad():
         opt.prompt,
         device,
         1,
-        False,
+        True,
         None,
     )
 
@@ -135,20 +135,37 @@ for i, t in enumerate(timesteps):
     loss.backward()
 
     with torch.no_grad():   
-        latent_model_input = pipeline.scheduler.scale_model_input(latents, t)
+        latent_model_input = pipeline.scheduler.scale_model_input(torch.cat([latents] * 2) , t)
 
         noise_pred = pipeline.unet(
             latent_model_input,
             t,
             encoder_hidden_states=prompt_embeds,
-        )
-        noise_pred.sample -= latents.grad*7#i/30
+        ).sample
 
-        latents = pipeline.scheduler.step(noise_pred.sample, t, latents).prev_sample
-    
-    print(i)
+        noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+        noise_pred = noise_pred_uncond + 7.5 * (noise_pred_text - noise_pred_uncond)
 
+        #noise_pred += latents.grad*i*i/1500
 
+        noise_pred += latents.grad*i/30
+
+        latents = pipeline.scheduler.step(noise_pred, t, latents).prev_sample
+        
+        preds = get_pred_from_cls_output([out[0], out[1], out[2]])
+        for n in range(len(preds)):
+            pred_delta = out[n + 3]
+            delta_value = pred_delta[torch.arange(pred_delta.size(0)), preds[n].long()].tanh() / 2
+            preds[n] = (preds[n].float() + delta_value + 0.5) * opt.bin_size
+
+        # Azimuth is between [0, 360), Elevation is between (-90, 90), In-plane Rotation is between [-180, 180)
+        azi = preds[0].squeeze().cpu().numpy()
+        ele = (preds[1] - 90).squeeze().cpu().numpy()
+        rot = (preds[2] - 180).squeeze().cpu().numpy()
+        print("I = {:.1f} \t Loss = {:.3f} \t Azimuth = {:.3f} \t Elevation = {:.3f} \t Inplane-Rotation = {:.3f}".format(float(i), loss, azi, ele, rot))
+
+#x = pipeline(opt.prompt, return_dict=False, guidance_scale=1.0)
+#x[0][0].save("test10.png", "PNG")
 # 5. Save
 with torch.no_grad():
     image = pipeline.decode_latents(latents)
